@@ -9,7 +9,7 @@ export interface MarketSnapshot {
 }
 
 const KALSHI_API_BASE = "https://api.elections.kalshi.com/trade-api/v2";
-const MARKET_LIST_STATUSES = ["open", "closed", "settled"] as const;
+const MARKET_LIST_STATUSES = ["open", "active", "closed", "settled"] as const;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -32,7 +32,10 @@ function normalizePrice(value: unknown): number | null {
   const numeric = coerceNumber(value);
   if (numeric === null) return null;
   let normalized = numeric;
-  if (normalized > 1.01) {
+  // Kalshi prices are commonly expressed in cents (0-100). Treat integer cents as such.
+  if (Number.isInteger(normalized) && normalized >= 0 && normalized <= 100) {
+    normalized = normalized / 100;
+  } else if (normalized > 1.01) {
     normalized = normalized / 100;
   }
   return clamp(normalized, 0, 1);
@@ -210,6 +213,22 @@ function normalizeMarketRecord(
   };
 }
 
+function getResolutionTimestamp(market: Record<string, unknown>): number | null {
+  const rawDate =
+    market.close_time ??
+    market.closeTime ??
+    market.expiration_time ??
+    market.expirationTime ??
+    market.settlement_time ??
+    market.settlementTime ??
+    market.end_date ??
+    market.endDate;
+  const normalized = normalizeDate(rawDate);
+  if (!normalized) return null;
+  const time = new Date(normalized).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
 function getMarketTicker(market: Record<string, unknown>): string | null {
   const ticker =
     typeof market.ticker === "string"
@@ -218,6 +237,18 @@ function getMarketTicker(market: Record<string, unknown>): string | null {
         ? market.market_ticker
         : null;
   return ticker ? normalizeTicker(ticker) : null;
+}
+
+function uniqMarkets(markets: Record<string, unknown>[]): Record<string, unknown>[] {
+  const byTicker = new Map<string, Record<string, unknown>>();
+  for (const market of markets) {
+    const ticker = getMarketTicker(market);
+    if (!ticker) continue;
+    if (!byTicker.has(ticker)) {
+      byTicker.set(ticker, market);
+    }
+  }
+  return Array.from(byTicker.values());
 }
 
 async function fetchMarketByTicker(
@@ -297,17 +328,7 @@ async function fetchMarketsByFilter(
   }
 
   if (combined.length === 0) return [];
-
-  const byTicker = new Map<string, Record<string, unknown>>();
-  for (const market of combined) {
-    const ticker = getMarketTicker(market);
-    if (!ticker) continue;
-    if (!byTicker.has(ticker)) {
-      byTicker.set(ticker, market);
-    }
-  }
-
-  return Array.from(byTicker.values());
+  return uniqMarkets(combined);
 }
 
 async function resolveMarketFromUrl(
@@ -393,46 +414,91 @@ export async function fetchMarketSnapshotsForEvent(
 
   const parts = extractUrlParts(tickerOrUrl);
   const parsedTicker = extractTicker(tickerOrUrl);
-  let eventTicker: string | null = null;
+  const candidateTickers: string[] = [];
+  const pushCandidate = (value: string | null) => {
+    if (!value) return;
+    if (!candidateTickers.includes(value)) {
+      candidateTickers.push(value);
+    }
+  };
 
   let marketFromTicker: Record<string, unknown> | null = null;
   if (parsedTicker) {
+    pushCandidate(parsedTicker);
     marketFromTicker = await fetchMarketByTicker(parsedTicker, headers);
     if (marketFromTicker) {
-      eventTicker =
-        normalizeTicker(String(marketFromTicker.event_ticker ?? "")) ??
-        normalizeTicker(String(marketFromTicker.series_ticker ?? "")) ??
-        null;
+      const eventFromMarket = normalizeTicker(
+        String(marketFromTicker.event_ticker ?? "")
+      );
+      const seriesFromMarket = normalizeTicker(
+        String(marketFromTicker.series_ticker ?? "")
+      );
+      pushCandidate(eventFromMarket);
+      pushCandidate(seriesFromMarket);
     }
   }
 
-  if (!eventTicker && parts.seriesOrEvent) {
-    eventTicker = normalizeTicker(parts.seriesOrEvent);
+  if (parts.seriesOrEvent) {
+    const fromUrl = normalizeTicker(parts.seriesOrEvent);
+    pushCandidate(fromUrl);
   }
 
-  if (!eventTicker) return null;
+  if (candidateTickers.length === 0) return null;
 
-  const markets = await fetchMarketsByFilter(
-    { event_ticker: eventTicker, limit: "200" },
-    headers
-  );
-  const fallbackMarkets =
-    markets.length > 0
-      ? markets
-      : await fetchMarketsByFilter(
-          { series_ticker: eventTicker, limit: "200" },
-          headers
-        );
+  let combinedMarkets: Record<string, unknown>[] = [];
+  for (const ticker of candidateTickers) {
+    const byEvent = await fetchMarketsByFilter(
+      { event_ticker: ticker, limit: "200" },
+      headers
+    );
+    const bySeries = await fetchMarketsByFilter(
+      { series_ticker: ticker, limit: "200" },
+      headers
+    );
+    combinedMarkets = combinedMarkets.concat(byEvent, bySeries);
+  }
 
+  const fallbackMarkets = uniqMarkets(combinedMarkets);
   if (fallbackMarkets.length === 0) return null;
 
-  const snapshots = fallbackMarkets
+  const now = Date.now();
+  const activeMarkets = fallbackMarkets.filter((market) => {
+    const statusRaw = String(
+      market.status ?? market.market_status ?? ""
+    ).toLowerCase();
+    if (statusRaw) {
+      const activeStatuses = new Set(["open", "active", "trading"]);
+      const inactiveStatuses = new Set([
+        "closed",
+        "settled",
+        "finalized",
+        "expired",
+        "inactive",
+        "cancelled",
+        "canceled"
+      ]);
+      if (activeStatuses.has(statusRaw)) return true;
+      if (inactiveStatuses.has(statusRaw)) return false;
+    }
+    const resolutionTime = getResolutionTimestamp(market);
+    return resolutionTime ? resolutionTime >= now : true;
+  });
+
+  const marketsToNormalize =
+    activeMarkets.length > 0 ? activeMarkets : fallbackMarkets;
+
+  const snapshots = marketsToNormalize
     .map((market) => normalizeMarketRecord(market))
     .filter((snapshot): snapshot is MarketSnapshot => Boolean(snapshot));
 
   return {
-    eventTicker,
-    markets: snapshots
+    eventTicker: candidateTickers[0] ?? null,
+    markets: snapshots.sort((a, b) => {
+      const aTime = new Date(a.resolutionDate).getTime();
+      const bTime = new Date(b.resolutionDate).getTime();
+      if (Number.isNaN(aTime) || Number.isNaN(bTime)) return 0;
+      return aTime - bTime;
+    })
   };
 }
 

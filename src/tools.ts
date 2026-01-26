@@ -10,10 +10,10 @@ import { scheduleSchema } from "agents/schedule";
 import type { Chat } from "./server";
 import {
   fetchMarketSnapshot,
-  fetchMarketNews,
   fetchMarketSnapshotsForEvent,
   type MarketSnapshot
 } from "./lib/kalshi";
+import { fetchTopNewsWithFallback, type Article } from "./lib/news";
 import {
   makeRecommendation,
   type Position,
@@ -25,18 +25,35 @@ import {
   type PostMortem,
   type TradeSide
 } from "./lib/state";
+import {
+  clamp01,
+  computeAgentProbability,
+  computeConfidence,
+  runScoringSanityChecks,
+  type Claim,
+  type ConfidenceResult
+} from "./lib/scoring";
 
 const model = openai("gpt-4o-2024-11-20");
 const CHECK_WATCHLIST_PAYLOAD = JSON.stringify({ type: "checkWatchlist" });
 
+const claimSchema = z.object({
+  text: z.string(),
+  polarity: z.enum(["YES", "NO", "NEUTRAL"]),
+  source: z.string(),
+  is_numeric: z.boolean(),
+  recency_hours: z.number(),
+  reliability: z.number()
+});
+
 const researchSchema = z.object({
-  bull_case: z.string(),
-  bear_case: z.string(),
-  base_case: z.string(),
+  delta: z.number(),
+  claims: z.array(claimSchema),
+  bull_case: z.array(z.string()),
+  bear_case: z.array(z.string()),
+  base_case: z.array(z.string()),
   key_risks: z.array(z.string()),
-  invalidators: z.array(z.string()),
-  p_agent: z.number(),
-  confidence: z.number()
+  invalidators: z.array(z.string())
 });
 
 type ScheduleInput = z.infer<typeof scheduleSchema>;
@@ -46,19 +63,420 @@ type RecommendationResult = {
   snapshot: MarketSnapshot;
   research: MarketResearch;
   pMarket: number;
+  delta: number;
+  pAgent: number;
+  confidence: number;
+  confidenceBreakdown: ConfidenceResult;
 };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizeProbability(value: number): number {
-  if (!Number.isFinite(value)) return 0.5;
-  let normalized = value;
-  if (normalized > 1.01) {
-    normalized = normalized / 100;
+function clampDelta(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(-0.2, Math.min(0.2, value));
+}
+
+function clampHours(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(720, value));
+}
+
+function normalizeClaim(raw: Claim): Claim {
+  return {
+    text: raw.text?.trim() || "insufficient evidence",
+    polarity: raw.polarity ?? "NEUTRAL",
+    source: raw.source?.trim() || "",
+    is_numeric: Boolean(raw.is_numeric),
+    recency_hours: clampHours(raw.recency_hours),
+    reliability: clamp01(raw.reliability)
+  };
+}
+
+function formatArticles(
+  articles: { title: string; source: string; publishedAt: string; url: string }[]
+): string {
+  if (!articles.length) return "No articles available.";
+  return articles
+    .map((article, index) =>
+      `${index + 1}. ${article.title} — ${article.source} — ${article.publishedAt} — ${article.url}`
+    )
+    .join("\n");
+}
+
+function extractAnchorTerms(snapshot: {
+  title: string;
+  description?: string;
+  ticker?: string;
+}): string[] {
+  const title = snapshot.title ?? "";
+  const description = snapshot.description ?? "";
+  const ticker = snapshot.ticker ?? "";
+  const terms: string[] = [];
+
+  const add = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    if (!terms.find((existing) => existing.toLowerCase() === trimmed.toLowerCase())) {
+      terms.push(trimmed);
+    }
+  };
+
+  const ifMatch = description.match(/\bIf\s+([^,]+),\s+then/i);
+  if (ifMatch?.[1]) {
+    const subject = ifMatch[1].trim();
+    const subjectMatch = subject.match(
+      /^([A-Z][A-Za-z0-9.&-]*(?:\s+[A-Z][A-Za-z0-9.&-]*)*)/
+    );
+    if (subjectMatch?.[1]) {
+      add(subjectMatch[1]);
+    }
   }
-  return clamp(normalized, 0, 1);
+
+  const properMatches = description.match(
+    /([A-Z][A-Za-z0-9.&-]*(?:\s+[A-Z][A-Za-z0-9.&-]*)*)/g
+  );
+  if (properMatches) {
+    properMatches.forEach((match) => add(match));
+  }
+
+  const acronymMatches = title.match(/\b[A-Z]{2,}\b/g);
+  if (acronymMatches) {
+    acronymMatches.forEach((match) => add(match));
+  }
+
+  const tickerParts = ticker.split("-").filter(Boolean);
+  tickerParts.forEach((part) => {
+    if (/^[A-Z]{2,}$/.test(part)) {
+      add(part);
+    }
+  });
+
+  return terms;
+}
+
+function filterArticlesBySnapshot(
+  articles: Article[],
+  snapshot: { title: string; description?: string; ticker?: string }
+): Article[] {
+  if (!articles.length) return articles;
+  const anchors = extractAnchorTerms(snapshot);
+  if (!anchors.length) return articles;
+
+  const stopwords = new Set([
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "of",
+    "in",
+    "on",
+    "at",
+    "for",
+    "with",
+    "without",
+    "by",
+    "before",
+    "after",
+    "to",
+    "from"
+  ]);
+
+  const anchorTokens = new Set<string>();
+  anchors.forEach((anchor) => {
+    anchorTokens.add(anchor.toLowerCase());
+    anchor
+      .split(/\s+/)
+      .map((token) => token.toLowerCase())
+      .filter((token) => token.length >= 3)
+      .filter((token) => !stopwords.has(token))
+      .forEach((token) => anchorTokens.add(token));
+  });
+
+  return articles.filter((article) => {
+    const haystack = `${article.title} ${article.description ?? ""}`.toLowerCase();
+    return Array.from(anchorTokens).some((token) => haystack.includes(token));
+  });
+}
+
+function formatClaims(claims: Claim[]): string {
+  if (!claims.length) return "No claims provided.";
+  return claims
+    .map(
+      (claim) =>
+        `- [${claim.polarity}] ${claim.text} (${claim.source || "unsourced"})`
+    )
+    .join("\n");
+}
+
+function buildNewsQueries(snapshot: {
+  title: string;
+  description?: string;
+  ticker?: string;
+  category?: string;
+}): string[] {
+  const queries: string[] = [];
+  const push = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    if (!queries.includes(trimmed)) {
+      queries.push(trimmed);
+    }
+  };
+
+  const title = snapshot.title ?? "";
+  const description = snapshot.description ?? "";
+  const ticker = snapshot.ticker ?? "";
+  const category = snapshot.category ?? "";
+  const rawText = `${title} ${description} ${category}`.trim();
+
+  const stopwords = new Set([
+    "will",
+    "be",
+    "above",
+    "below",
+    "by",
+    "before",
+    "after",
+    "the",
+    "a",
+    "an",
+    "if",
+    "is",
+    "are",
+    "to",
+    "of",
+    "in",
+    "on",
+    "at",
+    "for",
+    "from",
+    "with",
+    "without",
+    "over",
+    "under",
+    "between",
+    "during",
+    "until",
+    "whether",
+    "does",
+    "do",
+    "did",
+    "has",
+    "have",
+    "had",
+    "can",
+    "could",
+    "would",
+    "should",
+    "might",
+    "may",
+    "market",
+    "price",
+    "resolve",
+    "resolution",
+    "yes",
+    "no",
+    "above",
+    "below",
+    "over",
+    "under",
+    "hit",
+    "reach",
+    "wins",
+    "win",
+    "before",
+    "after",
+    "who",
+    "what",
+    "when",
+    "where",
+    "why",
+    "how",
+    "which"
+  ]);
+
+  const months = new Set([
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "oct",
+    "nov",
+    "dec"
+  ]);
+
+  const normalized = rawText
+    .replace(/['’"]/g, "")
+    .replace(/[^a-zA-Z0-9\\s]/g, " ")
+    .replace(/\\s+/g, " ")
+    .trim();
+
+  const orderedTokens = normalized
+    .split(" ")
+    .map((token) => token.toLowerCase())
+    .filter((token) => token.length >= 3)
+    .filter((token) => !stopwords.has(token))
+    .filter((token) => !months.has(token))
+    .filter((token) => {
+      if (/^\\d+$/.test(token)) {
+        const year = Number(token);
+        return year >= 1900 && year <= 2100;
+      }
+      return true;
+    });
+
+  const freq = new Map<string, number>();
+  orderedTokens.forEach((token) => {
+    freq.set(token, (freq.get(token) ?? 0) + 1);
+  });
+
+  const topTokens = [...freq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([token]) => token)
+    .slice(0, 6);
+
+  const phraseScores = new Map<string, number>();
+  for (let i = 0; i < orderedTokens.length; i += 1) {
+    const tokenA = orderedTokens[i];
+    const tokenB = orderedTokens[i + 1];
+    const tokenC = orderedTokens[i + 2];
+    if (tokenA && tokenB) {
+      const bigram = `${tokenA} ${tokenB}`;
+      const score = (freq.get(tokenA) ?? 1) + (freq.get(tokenB) ?? 1);
+      phraseScores.set(bigram, (phraseScores.get(bigram) ?? 0) + score);
+    }
+    if (tokenA && tokenB && tokenC) {
+      const trigram = `${tokenA} ${tokenB} ${tokenC}`;
+      const score =
+        (freq.get(tokenA) ?? 1) +
+        (freq.get(tokenB) ?? 1) +
+        (freq.get(tokenC) ?? 1);
+      phraseScores.set(trigram, (phraseScores.get(trigram) ?? 0) + score);
+    }
+  }
+
+  const topPhrases = [...phraseScores.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([phrase]) => phrase)
+    .slice(0, 4);
+
+  const entityScores = new Map<string, { value: string; score: number }>();
+  const addEntity = (value: string, score: number) => {
+    const cleaned = value.trim();
+    if (!cleaned) return;
+    const lower = cleaned.toLowerCase();
+    if (cleaned.length < 2) return;
+    if (stopwords.has(lower) || months.has(lower)) return;
+    if (/^\\d+$/.test(cleaned)) return;
+    const existing = entityScores.get(lower);
+    if (existing) {
+      existing.score += score;
+    } else {
+      entityScores.set(lower, { value: cleaned, score });
+    }
+  };
+
+  const ifMatch = description.match(/\\bIf\\s+([^,]+),\\s+then/i);
+  if (ifMatch?.[1]) {
+    const subject = ifMatch[1].trim();
+    const subjectMatch = subject.match(
+      /^([A-Z][A-Za-z0-9.&-]*(?:\\s+[A-Z][A-Za-z0-9.&-]*)*)/
+    );
+    if (subjectMatch?.[1]) {
+      addEntity(subjectMatch[1], 5);
+    }
+  }
+
+  const properFromDescription = description.match(
+    /([A-Z][A-Za-z0-9.&-]*(?:\\s+[A-Z][A-Za-z0-9.&-]*)*)/g
+  );
+  if (properFromDescription) {
+    properFromDescription.forEach((match) => addEntity(match, 3));
+  }
+
+  const properFromTitle = title.match(
+    /([A-Z][A-Za-z0-9.&-]*(?:\\s+[A-Z][A-Za-z0-9.&-]*)*)/g
+  );
+  if (properFromTitle) {
+    properFromTitle.forEach((match) => addEntity(match, 2));
+  }
+
+  const acronyms = rawText.match(/\\b[A-Z]{2,}\\b/g);
+  if (acronyms) {
+    acronyms.forEach((match) => addEntity(match, 2));
+  }
+
+  const quotedMatches = rawText.match(/\"([^\"]{3,})\"/g);
+  if (quotedMatches) {
+    quotedMatches.forEach((match) => addEntity(match.replace(/\"/g, ""), 2));
+  }
+
+  const tickerParts = ticker.split("-").filter(Boolean);
+  tickerParts.forEach((part) => {
+    if (/^[A-Z]{2,}$/.test(part)) {
+      addEntity(part, 4);
+    }
+  });
+
+  const topEntities = [...entityScores.values()]
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.value)
+    .slice(0, 3);
+
+  if (topTokens.length) {
+    push(topTokens.join(" "));
+  }
+
+  topPhrases.forEach((phrase) => push(phrase));
+  topEntities.forEach((entity) => push(entity));
+
+  const topTerms = topTokens.slice(0, 3);
+  if (topEntities.length && topTerms.length) {
+    for (const entity of topEntities) {
+      for (const term of topTerms) {
+        push(`${entity} ${term}`);
+      }
+    }
+  }
+
+  if (topEntities.length && topPhrases.length) {
+    for (const entity of topEntities) {
+      for (const phrase of topPhrases.slice(0, 2)) {
+        push(`${entity} ${phrase}`);
+      }
+    }
+  }
+
+  const yearTokens = topTokens.filter((token) => /^\\d{4}$/.test(token));
+  if (yearTokens.length && topEntities.length) {
+    for (const entity of topEntities) {
+      for (const year of yearTokens) {
+        push(`${entity} ${year}`);
+      }
+    }
+  }
+
+  return queries.slice(0, 12);
 }
 
 function resolveSessionId(sessionId?: string): string {
@@ -72,7 +490,9 @@ function resolveSessionId(sessionId?: string): string {
   );
 }
 
-function readEnv(key: "KALSHI_API_KEY" | "NEWS_API_KEY"): string | undefined {
+function readEnv(
+  key: "KALSHI_API_KEY" | "NEWS_API_KEY" | "NEWS_API_PROXY_URL"
+): string | undefined {
   if (typeof process !== "undefined" && process.env?.[key]) {
     return process.env[key];
   }
@@ -168,55 +588,114 @@ async function runResearch(
   ticker: string,
   sessionId?: string
 ): Promise<MarketResearch | null> {
+  runScoringSanityChecks();
   const state = getSessionState(resolveSessionId(sessionId));
-  const existing = state.researchByTicker[ticker];
-  if (existing) return existing;
+  const existing = state.lastResearchByTicker[ticker];
+  if (
+    existing &&
+    Array.isArray(existing.claims) &&
+    typeof existing.delta === "number" &&
+    typeof existing.p_market === "number" &&
+    existing.confidenceBreakdown
+  ) {
+    return existing;
+  }
 
   const apiKey = readEnv("KALSHI_API_KEY");
   const snapshot = await fetchMarketSnapshot(ticker, apiKey);
   if (!snapshot) return null;
 
   const newsKey = readEnv("NEWS_API_KEY");
-  const headlines = await fetchMarketNews(snapshot.title, newsKey);
+  const newsProxy = readEnv("NEWS_API_PROXY_URL");
+  const { articles, usedQueries, errors: newsErrors } = await fetchTopNewsWithFallback(
+    buildNewsQueries(snapshot),
+    newsKey,
+    newsProxy
+  );
+  const filteredArticles = filterArticlesBySnapshot(articles, snapshot);
 
+  const pMarket = snapshot.yesPrice;
   const prompt = `You are MarketScout, a Kalshi prediction-market research assistant.
 
 Market snapshot:
 ${JSON.stringify(snapshot, null, 2)}
 
 Recent headlines:
-${headlines.length ? headlines.map((headline, index) => `${index + 1}. ${headline}`).join("\n") : "No recent headlines available."}
+${articles.length ? articles.map((article, index) => `${index + 1}. ${article.title} — ${article.source} — ${article.publishedAt} — ${article.url}`).join("\n") : "No recent headlines available."}
 
-Provide a concise research brief.
-- Use only the snapshot and headlines provided.
-- bull_case, bear_case, base_case should each be 2-4 sentences.
+Market prior (p_market) from pricing: ${pMarket.toFixed(3)}.
+
+Provide a concise research brief. Use only the snapshot and headlines provided.
+- Use p_market as the prior; output only a delta adjustment in [-0.20, +0.20].
+- If evidence is weak, keep delta near 0 and include an \"insufficient evidence\" claim.
+- Claims must be grounded only in the provided articles or market description.
+- recency_hours should be conservative (24-168 if unknown).
+- reliability must be 0..1 (lower for weaker evidence).
+- If a claim has no clear source, set source to an empty string.
+- bull_case, bear_case, base_case should be short bullet points (arrays of strings).
 - key_risks and invalidators should be short bullet lists.
-- p_agent is your estimated probability of YES (0-1).
-- confidence is 0-1.
 `;
 
-  const { object } = await generateObject({
-    model,
-    schema: researchSchema,
-    prompt
-  });
+  let object: z.infer<typeof researchSchema> | null = null;
+  let parseFailed = false;
+  try {
+    const result = await generateObject({
+      model,
+      schema: researchSchema,
+      prompt
+    });
+    object = result.object;
+  } catch (error) {
+    console.error("researchMarket parse error", error);
+    parseFailed = true;
+  }
+
+  const delta = clampDelta(object?.delta ?? 0);
+  const claims = (object?.claims ?? []).map(normalizeClaim);
+  const days = daysToResolution(snapshot.resolutionDate);
+  const confidenceBreakdown = computeConfidence(claims, days);
+  const confidenceValue = parseFailed ? 0.3 : confidenceBreakdown.confidence;
+  const pAgent = computeAgentProbability(pMarket, delta);
 
   const research: MarketResearch = {
     snapshot,
-    news: headlines,
-    bull_case: object.bull_case.trim(),
-    bear_case: object.bear_case.trim(),
-    base_case: object.base_case.trim(),
-    key_risks: object.key_risks.map((risk) => risk.trim()).filter(Boolean),
-    invalidators: object.invalidators
-      .map((invalidator) => invalidator.trim())
-      .filter(Boolean),
-    p_agent: normalizeProbability(object.p_agent),
-    confidence: normalizeProbability(object.confidence),
+    articles: filteredArticles,
+    newsQueries: usedQueries,
+    newsErrors,
+    bull_case:
+      object?.bull_case?.map((item) => item.trim()).filter(Boolean) ?? [
+        "Insufficient data to form a bull case."
+      ],
+    bear_case:
+      object?.bear_case?.map((item) => item.trim()).filter(Boolean) ?? [
+        "Insufficient data to form a bear case."
+      ],
+    base_case:
+      object?.base_case?.map((item) => item.trim()).filter(Boolean) ?? [
+        "Insufficient data to form a base case."
+      ],
+    key_risks:
+      object?.key_risks?.map((risk) => risk.trim()).filter(Boolean) ?? [
+        "Insufficient data to identify key risks."
+      ],
+    invalidators:
+      object?.invalidators
+        ?.map((invalidator) => invalidator.trim())
+        .filter(Boolean) ?? ["Insufficient data to identify invalidators."],
+    claims,
+    p_market: pMarket,
+    delta,
+    p_agent: pAgent,
+    confidence: confidenceValue,
+    confidenceBreakdown: {
+      ...confidenceBreakdown,
+      confidence: confidenceValue
+    },
     generatedAt: new Date().toISOString()
   };
 
   state.researchByTicker[ticker] = research;
+  state.lastResearchByTicker[ticker] = research;
   return research;
 }
 
@@ -243,11 +722,15 @@ async function getRecommendationForTicker(
   const days = daysToResolution(snapshot.resolutionDate);
   const currentPosition = getCurrentPosition(state.trades, ticker);
   const maxBet = options?.maxBet ?? 100;
+  const delta = clampDelta(research.delta);
+  const pAgent = computeAgentProbability(pMarket, delta);
+  const confidenceBreakdown = computeConfidence(research.claims, days);
+  const confidence = confidenceBreakdown.confidence;
 
   const recommendation = makeRecommendation(
-    research.p_agent,
+    pAgent,
     pMarket,
-    research.confidence,
+    confidence,
     liquidity,
     days,
     currentPosition,
@@ -260,7 +743,11 @@ async function getRecommendationForTicker(
     recommendation,
     snapshot,
     research,
-    pMarket
+    pMarket,
+    delta,
+    pAgent,
+    confidence,
+    confidenceBreakdown
   };
 }
 
@@ -357,17 +844,79 @@ const researchMarket = tool({
     if (!research) {
       return { error: "Market not found or unavailable." };
     }
+    const displayText = [
+      "MARKET PRIOR",
+      `- Market YES price: ${research.p_market.toFixed(3)}`,
+      "",
+      "EVIDENCE DELTA",
+      `- Delta: ${research.delta >= 0 ? "+" : ""}${research.delta.toFixed(3)}`,
+      "",
+      "AGENT PROBABILITY",
+      `- p_agent: ${research.p_agent.toFixed(3)}`,
+      "",
+      "CONFIDENCE BREAKDOWN",
+      `- Recency: ${research.confidenceBreakdown.breakdown.recencyScore.toFixed(2)}`,
+      `- Source quality: ${research.confidenceBreakdown.breakdown.sourceQualityScore.toFixed(2)}`,
+      `- Multiplicity: ${research.confidenceBreakdown.breakdown.multiplicityScore.toFixed(2)}`,
+      `- Specificity: ${research.confidenceBreakdown.breakdown.specificityScore.toFixed(2)}`,
+      `- Time factor: ${research.confidenceBreakdown.breakdown.timeFactorScore.toFixed(2)}`,
+      `- Final confidence: ${research.confidence.toFixed(2)}`,
+      "",
+      "CONFIDENCE INPUTS",
+      `- Claims: ${research.confidenceBreakdown.details.numClaims}`,
+      `- Distinct sources: ${research.confidenceBreakdown.details.distinctSources}`,
+      `- Avg recency (hours): ${research.confidenceBreakdown.details.avgRecencyHours.toFixed(1)}`,
+      `- Numeric claim rate: ${research.confidenceBreakdown.details.numericClaimRate.toFixed(2)}`,
+      `- Days to resolution: ${research.confidenceBreakdown.details.daysToResolution.toFixed(0)}`,
+      "",
+      "ARTICLES USED",
+      formatArticles(research.articles),
+      "",
+      "NEWS QUERIES USED",
+      research.newsQueries && research.newsQueries.length
+        ? research.newsQueries.map((query) => `- ${query}`).join("\n")
+        : "No queries executed.",
+      "",
+      "NEWS FETCH ERRORS",
+      research.newsErrors && research.newsErrors.length
+        ? research.newsErrors.map((err) => `- ${err}`).join("\n")
+        : "None",
+      "",
+      "CLAIMS",
+      formatClaims(research.claims)
+    ].join("\n");
+
     return {
       ticker: research.snapshot.ticker,
       snapshot: research.snapshot,
-      news: research.news,
+      articles: research.articles,
+      newsQueries: research.newsQueries ?? [],
+      newsErrors: research.newsErrors ?? [],
       bull_case: research.bull_case,
       bear_case: research.bear_case,
       base_case: research.base_case,
       key_risks: research.key_risks,
       invalidators: research.invalidators,
+      claims: research.claims,
+      p_market: research.p_market,
+      delta: research.delta,
       p_agent: research.p_agent,
-      confidence: research.confidence
+      confidence: research.confidence,
+      confidenceBreakdown: research.confidenceBreakdown,
+      scoreExplanationText: [
+        "Score explanation:",
+        `- Market prior (p_market): ${(research.p_market * 100).toFixed(1)}%`,
+        `- Delta from evidence: ${(research.delta * 100).toFixed(1)} pts (bounded)`,
+        `- Agent probability (p_agent): ${(research.p_agent * 100).toFixed(1)}%`,
+        `- Confidence: ${(research.confidence * 100).toFixed(1)}%`,
+        `  recency: ${research.confidenceBreakdown.breakdown.recencyScore.toFixed(2)}`,
+        `  sourceQuality: ${research.confidenceBreakdown.breakdown.sourceQualityScore.toFixed(2)}`,
+        `  multiplicity: ${research.confidenceBreakdown.breakdown.multiplicityScore.toFixed(2)}`,
+        `  specificity: ${research.confidenceBreakdown.breakdown.specificityScore.toFixed(2)}`,
+        `  timeFactor: ${research.confidenceBreakdown.breakdown.timeFactorScore.toFixed(2)}`,
+        `  inputs: claims=${research.confidenceBreakdown.details.numClaims}, sources=${research.confidenceBreakdown.details.distinctSources}, avgRecencyHours=${research.confidenceBreakdown.details.avgRecencyHours.toFixed(1)}, numericRate=${research.confidenceBreakdown.details.numericClaimRate.toFixed(2)}, daysToResolution=${research.confidenceBreakdown.details.daysToResolution.toFixed(0)}`
+      ].join("\n"),
+      displayText
     };
   }
 });
@@ -386,10 +935,80 @@ const recommendTrade = tool({
     if (!result) {
       return { error: "Unable to generate recommendation." };
     }
+    const explanation = {
+      p_market: result.pMarket,
+      delta: result.delta,
+      p_agent: result.pAgent,
+      confidence: result.confidence,
+      breakdown: result.confidenceBreakdown.breakdown
+    };
+    const scoreExplanationText = [
+      "Score explanation:",
+      `- Market prior (p_market): ${(result.pMarket * 100).toFixed(1)}%`,
+      `- Delta from evidence: ${(result.delta * 100).toFixed(1)} pts (bounded)`,
+      `- Agent probability (p_agent): ${(result.pAgent * 100).toFixed(1)}%`,
+      `- Confidence: ${(result.confidence * 100).toFixed(1)}%`,
+      `  recency: ${result.confidenceBreakdown.breakdown.recencyScore.toFixed(2)}`,
+      `  sourceQuality: ${result.confidenceBreakdown.breakdown.sourceQualityScore.toFixed(2)}`,
+      `  multiplicity: ${result.confidenceBreakdown.breakdown.multiplicityScore.toFixed(2)}`,
+      `  specificity: ${result.confidenceBreakdown.breakdown.specificityScore.toFixed(2)}`,
+      `  timeFactor: ${result.confidenceBreakdown.breakdown.timeFactorScore.toFixed(2)}`,
+      `  inputs: claims=${result.confidenceBreakdown.details.numClaims}, sources=${result.confidenceBreakdown.details.distinctSources}, avgRecencyHours=${result.confidenceBreakdown.details.avgRecencyHours.toFixed(1)}, numericRate=${result.confidenceBreakdown.details.numericClaimRate.toFixed(2)}, daysToResolution=${result.confidenceBreakdown.details.daysToResolution.toFixed(0)}`
+    ].join("\n");
+    const displayText = [
+      "MARKET PRIOR",
+      `- Market YES price: ${result.pMarket.toFixed(3)}`,
+      "",
+      "EVIDENCE DELTA",
+      `- Delta: ${result.delta >= 0 ? "+" : ""}${result.delta.toFixed(3)}`,
+      "",
+      "AGENT PROBABILITY",
+      `- p_agent: ${result.pAgent.toFixed(3)}`,
+      "",
+      "CONFIDENCE BREAKDOWN",
+      `- Recency: ${result.confidenceBreakdown.breakdown.recencyScore.toFixed(2)}`,
+      `- Source quality: ${result.confidenceBreakdown.breakdown.sourceQualityScore.toFixed(2)}`,
+      `- Multiplicity: ${result.confidenceBreakdown.breakdown.multiplicityScore.toFixed(2)}`,
+      `- Specificity: ${result.confidenceBreakdown.breakdown.specificityScore.toFixed(2)}`,
+      `- Time factor: ${result.confidenceBreakdown.breakdown.timeFactorScore.toFixed(2)}`,
+      `- Final confidence: ${result.confidence.toFixed(2)}`,
+      "",
+      "CONFIDENCE INPUTS",
+      `- Claims: ${result.confidenceBreakdown.details.numClaims}`,
+      `- Distinct sources: ${result.confidenceBreakdown.details.distinctSources}`,
+      `- Avg recency (hours): ${result.confidenceBreakdown.details.avgRecencyHours.toFixed(1)}`,
+      `- Numeric claim rate: ${result.confidenceBreakdown.details.numericClaimRate.toFixed(2)}`,
+      `- Days to resolution: ${result.confidenceBreakdown.details.daysToResolution.toFixed(0)}`,
+      "",
+      "ARTICLES USED",
+      formatArticles(result.research.articles),
+      "",
+      "NEWS QUERIES USED",
+      result.research.newsQueries && result.research.newsQueries.length
+        ? result.research.newsQueries.map((query) => `- ${query}`).join("\n")
+        : "No queries executed.",
+      "",
+      "NEWS FETCH ERRORS",
+      result.research.newsErrors && result.research.newsErrors.length
+        ? result.research.newsErrors.map((err) => `- ${err}`).join("\n")
+        : "None",
+      "",
+      "CLAIMS",
+      formatClaims(result.research.claims)
+    ].join("\n");
     return {
       ticker,
-      p_agent: result.research.p_agent,
       p_market: result.pMarket,
+      delta: result.delta,
+      p_agent: result.pAgent,
+      articles: result.research.articles,
+      newsQueries: result.research.newsQueries ?? [],
+      newsErrors: result.research.newsErrors ?? [],
+      claims: result.research.claims,
+      confidenceBreakdown: result.confidenceBreakdown,
+      scoreExplanation: explanation,
+      scoreExplanationText,
+      displayText,
       ...result.recommendation
     };
   }
@@ -435,18 +1054,7 @@ const logTrade = tool({
     side: z.enum(["YES", "NO"]),
     size: z.number(),
     price: z.number()
-  }),
-  execute: async ({ ticker, side, size, price }) => {
-    const state = getSessionState(resolveSessionId());
-    state.trades.push({
-      ticker,
-      side,
-      size,
-      entryPrice: price,
-      entryTime: new Date().toISOString()
-    });
-    return { trades: state.trades };
-  }
+  })
 });
 
 const listTrades = tool({
@@ -474,8 +1082,65 @@ const scheduleWatchlistChecks = tool({
   description: "Schedule periodic watchlist checks",
   inputSchema: z.object({
     frequencyMinutes: z.number().int().positive()
-  }),
-  execute: async ({ frequencyMinutes }) => {
+  })
+});
+
+const checkWatchlist = tool({
+  description: "Check watchlist and alert on recommendation changes",
+  inputSchema: z.object({}),
+  execute: async () => runCheckWatchlist(resolveSessionId())
+});
+
+const postMortem = tool({
+  description: "Generate a post-mortem after market resolution",
+  inputSchema: z.object({
+    ticker: z.string(),
+    outcome: z.enum(["YES", "NO"])
+  })
+});
+
+export const tools = {
+  analyzeMarket,
+  researchMarket,
+  recommendTrade,
+  addToWatchlist,
+  removeFromWatchlist,
+  listWatchlist,
+  logTrade,
+  listTrades,
+  setAlertThreshold,
+  scheduleWatchlistChecks,
+  checkWatchlist,
+  postMortem
+} satisfies ToolSet;
+
+export const executions = {
+  logTrade: async ({
+    ticker,
+    side,
+    size,
+    price
+  }: {
+    ticker: string;
+    side: TradeSide;
+    size: number;
+    price: number;
+  }) => {
+    const state = getSessionState(resolveSessionId());
+    state.trades.push({
+      ticker,
+      side,
+      size,
+      entryPrice: price,
+      entryTime: new Date().toISOString()
+    });
+    return { trades: state.trades };
+  },
+  scheduleWatchlistChecks: async ({
+    frequencyMinutes
+  }: {
+    frequencyMinutes: number;
+  }) => {
     const { cron, normalizedMinutes, note } = minutesToCron(frequencyMinutes);
     const message = await scheduleTaskInternal({
       description: CHECK_WATCHLIST_PAYLOAD,
@@ -491,25 +1156,19 @@ const scheduleWatchlistChecks = tool({
       frequencyMinutes: normalizedMinutes,
       note
     };
-  }
-});
-
-const checkWatchlist = tool({
-  description: "Check watchlist and alert on recommendation changes",
-  inputSchema: z.object({}),
-  execute: async () => runCheckWatchlist(resolveSessionId())
-});
-
-const postMortem = tool({
-  description: "Generate a post-mortem after market resolution",
-  inputSchema: z.object({
-    ticker: z.string(),
-    outcome: z.enum(["YES", "NO"])
-  }),
-  execute: async ({ ticker, outcome }) => {
+  },
+  postMortem: async ({
+    ticker,
+    outcome
+  }: {
+    ticker: string;
+    outcome: TradeSide;
+  }) => {
     const state = getSessionState(resolveSessionId());
     const lastRecommendation = state.lastRecommendationByTicker[ticker];
-    const lastTrade = [...state.trades].reverse().find((trade) => trade.ticker === ticker);
+    const lastTrade = [...state.trades]
+      .reverse()
+      .find((trade) => trade.ticker === ticker);
 
     const prompt = `You are MarketScout. A market has resolved.
 
@@ -546,23 +1205,6 @@ Provide a concise post-mortem summary with lessons learned and improvements.`;
     state.postMortemsByTicker[ticker] = result;
     return result;
   }
-});
-
-export const tools = {
-  analyzeMarket,
-  researchMarket,
-  recommendTrade,
-  addToWatchlist,
-  removeFromWatchlist,
-  listWatchlist,
-  logTrade,
-  listTrades,
-  setAlertThreshold,
-  scheduleWatchlistChecks,
-  checkWatchlist,
-  postMortem
-} satisfies ToolSet;
-
-export const executions = {};
+};
 
 export { parseScheduledPayload, CHECK_WATCHLIST_PAYLOAD };

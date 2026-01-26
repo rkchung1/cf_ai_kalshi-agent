@@ -1,5 +1,7 @@
 import type { MarketSnapshot } from "./kalshi";
 import type { Recommendation } from "./recommendation";
+import type { Claim, ConfidenceResult } from "./scoring";
+import type { Article } from "./news";
 
 export type TradeSide = "YES" | "NO";
 
@@ -13,14 +15,20 @@ export interface Trade {
 
 export interface MarketResearch {
   snapshot: MarketSnapshot;
-  news: string[];
-  bull_case: string;
-  bear_case: string;
-  base_case: string;
+  articles: Article[];
+  newsQueries?: string[];
+  newsErrors?: string[];
+  bull_case: string[];
+  bear_case: string[];
+  base_case: string[];
   key_risks: string[];
   invalidators: string[];
+  claims: Claim[];
+  p_market: number;
+  delta: number;
   p_agent: number;
   confidence: number;
+  confidenceBreakdown: ConfidenceResult;
   generatedAt: string;
 }
 
@@ -37,6 +45,7 @@ export interface SessionState {
   watchlist: Set<string>;
   trades: Trade[];
   lastRecommendationByTicker: Record<string, Recommendation>;
+  lastResearchByTicker: Record<string, MarketResearch>;
   alertDelta: number;
   researchByTicker: Record<string, MarketResearch>;
   postMortemsByTicker: Record<string, PostMortem>;
@@ -52,6 +61,7 @@ export function getSessionState(sessionId: string): SessionState {
     watchlist: new Set(),
     trades: [],
     lastRecommendationByTicker: {},
+    lastResearchByTicker: {},
     alertDelta: 0.04,
     researchByTicker: {},
     postMortemsByTicker: {}

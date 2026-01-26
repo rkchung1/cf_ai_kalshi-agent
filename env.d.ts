@@ -9,6 +9,7 @@ declare namespace Cloudflare {
 		OPENAI_API_KEY: string;
 		KALSHI_API_KEY: string;
 		NEWS_API_KEY: string;
+		NEWS_API_PROXY_URL: string;
 		Chat: DurableObjectNamespace<import("./src/server").Chat>;
 		AI: Ai;
 	}
@@ -20,6 +21,9 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 declare namespace NodeJS {
 	interface ProcessEnv
 		extends StringifyValues<
-			Pick<Cloudflare.Env, "OPENAI_API_KEY" | "KALSHI_API_KEY" | "NEWS_API_KEY">
+			Pick<
+				Cloudflare.Env,
+				"OPENAI_API_KEY" | "KALSHI_API_KEY" | "NEWS_API_KEY" | "NEWS_API_PROXY_URL"
+			>
 		> {}
 }
