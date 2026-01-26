@@ -1,7 +1,5 @@
 import { routeAgentRequest, type Schedule } from "agents";
 
-import { getSchedulePrompt } from "agents/schedule";
-
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import {
   generateId,
@@ -15,7 +13,7 @@ import {
 } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { processToolCalls, cleanupMessages } from "./utils";
-import { tools, executions } from "./tools";
+import { tools, executions, parseScheduledPayload, runCheckWatchlist } from "./tools";
 // import { env } from "cloudflare:workers";
 
 const model = openai("gpt-4o-2024-11-20");
@@ -64,12 +62,19 @@ export class Chat extends AIChatAgent<Env> {
         });
 
         const result = streamText({
-          system: `You are a helpful assistant that can do various tasks... 
+          system: `You are MarketScout, a Kalshi prediction-market research and recommendation agent.
 
-${getSchedulePrompt({ date: new Date() })}
+Use analyzeMarket to fetch markets.
+Use researchMarket to build theses and probabilities.
+Use recommendTrade to produce BUY/SELL/HOLD decisions.
+Use addToWatchlist/removeFromWatchlist/listWatchlist for tracking.
+Use logTrade and listTrades for paper trades.
+Use scheduleWatchlistChecks and checkWatchlist to monitor markets.
+Use postMortem after resolution.
 
-If the user asks to schedule a task, use the schedule tool to schedule the task.
-`,
+Never invent market data.
+Never place real trades.
+Only recommend trades when edge exceeds threshold.`,
 
           messages: await convertToModelMessages(processedMessages),
           model,
@@ -90,6 +95,30 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
     return createUIMessageStreamResponse({ stream });
   }
   async executeTask(description: string, _task: Schedule<string>) {
+    const parsed = parseScheduledPayload(description);
+    if (parsed?.type === "checkWatchlist") {
+      const result = await runCheckWatchlist(this.name);
+      await this.saveMessages([
+        ...this.messages,
+        {
+          id: generateId(),
+          role: "assistant",
+          parts: [
+            {
+              type: "text",
+              text: `Watchlist check complete. Alerts: ${
+                result.alerts.length ? result.alerts.join(" | ") : "none"
+              }`
+            }
+          ],
+          metadata: {
+            createdAt: new Date()
+          }
+        }
+      ]);
+      return;
+    }
+
     await this.saveMessages([
       ...this.messages,
       {

@@ -7,6 +7,8 @@ declare namespace Cloudflare {
 	}
 	interface Env {
 		OPENAI_API_KEY: string;
+		KALSHI_API_KEY: string;
+		NEWS_API_KEY: string;
 		Chat: DurableObjectNamespace<import("./src/server").Chat>;
 		AI: Ai;
 	}
@@ -16,5 +18,8 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "OPENAI_API_KEY">> {}
+	interface ProcessEnv
+		extends StringifyValues<
+			Pick<Cloudflare.Env, "OPENAI_API_KEY" | "KALSHI_API_KEY" | "NEWS_API_KEY">
+		> {}
 }
