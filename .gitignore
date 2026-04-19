@@ -146,3 +146,7 @@ dist
 .dev.vars*
 !.dev.vars.example
 !.env.example
+
+# Cursor
+.cursor/
+.understand-anything/
