@@ -1,9 +1,5 @@
 # Kalshi Prediction Market Agent
 
-This repo is a Kalshi market research and paper-trading assistant built on Cloudflare Agents, React, and OpenAI. It is no longer the stock Cloudflare chat starter: the app now behaves like a prediction-market workflow tool that can analyze Kalshi markets, build a research brief, score evidence, recommend paper trades, monitor a watchlist, and generate post-mortems after resolution.
-
-In the code, the agent prompt calls the product `MarketScout`. In the UI, it is labeled `Kalshi Agent`.
-
 ## What Is Implemented
 
 - Analyze a Kalshi ticker or market URL and normalize the result into a market snapshot.
