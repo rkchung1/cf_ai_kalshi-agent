@@ -37,7 +37,9 @@ export function DebugTab() {
       <Card className="bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-neutral-900">Debug Panel</h2>
+            <h2 className="text-lg font-semibold text-neutral-900">
+              Debug Panel
+            </h2>
             <p className="text-sm text-neutral-500">
               Inspect LLM prompts, tool calls, and JSON inputs/outputs.
             </p>

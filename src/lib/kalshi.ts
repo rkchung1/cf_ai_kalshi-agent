@@ -104,7 +104,9 @@ function extractUrlParts(tickerOrUrl: string): {
 
     const seriesOrEvent = segments[marketsIndex + 1];
     const descriptiveSlug =
-      segments.length >= marketsIndex + 3 ? segments[marketsIndex + 2] : undefined;
+      segments.length >= marketsIndex + 3
+        ? segments[marketsIndex + 2]
+        : undefined;
     const candidateSlug = segments[segments.length - 1];
 
     return {
@@ -154,24 +156,26 @@ function pickNoPrice(market: Record<string, unknown>): number | null {
 function normalizeMarketRecord(
   market: Record<string, unknown>
 ): MarketSnapshot | null {
-  const ticker = normalizeTicker(String(market.ticker ?? market.market_ticker ?? ""));
+  const ticker = normalizeTicker(
+    String(market.ticker ?? market.market_ticker ?? "")
+  );
   if (!ticker) return null;
 
-  const title =
-    (market.title ??
-      market.name ??
-      market.event_title ??
-      market.eventTitle ??
-      "") as string;
-  const category =
-    (market.category ?? market.event_ticker ?? market.series_ticker ?? "") as string;
-  const description =
-    (market.description ??
-      market.rules_primary ??
-      market.rulesPrimary ??
-      market.subtitle ??
-      market.details ??
-      "") as string;
+  const title = (market.title ??
+    market.name ??
+    market.event_title ??
+    market.eventTitle ??
+    "") as string;
+  const category = (market.category ??
+    market.event_ticker ??
+    market.series_ticker ??
+    "") as string;
+  const description = (market.description ??
+    market.rules_primary ??
+    market.rulesPrimary ??
+    market.subtitle ??
+    market.details ??
+    "") as string;
 
   const resolutionDate = normalizeDate(
     market.close_time ??
@@ -213,7 +217,9 @@ function normalizeMarketRecord(
   };
 }
 
-function getResolutionTimestamp(market: Record<string, unknown>): number | null {
+function getResolutionTimestamp(
+  market: Record<string, unknown>
+): number | null {
   const rawDate =
     market.close_time ??
     market.closeTime ??
@@ -239,7 +245,9 @@ function getMarketTicker(market: Record<string, unknown>): string | null {
   return ticker ? normalizeTicker(ticker) : null;
 }
 
-function uniqMarkets(markets: Record<string, unknown>[]): Record<string, unknown>[] {
+function uniqMarkets(
+  markets: Record<string, unknown>[]
+): Record<string, unknown>[] {
   const byTicker = new Map<string, Record<string, unknown>>();
   for (const market of markets) {
     const ticker = getMarketTicker(market);
@@ -318,10 +326,7 @@ async function fetchMarketsByFilter(
 
   let combined: Record<string, unknown>[] = [];
   for (const status of MARKET_LIST_STATUSES) {
-    const markets = await fetchMarketsList(
-      { ...filter, status },
-      headers
-    );
+    const markets = await fetchMarketsList({ ...filter, status }, headers);
     if (markets.length) {
       combined = combined.concat(markets);
     }
@@ -352,10 +357,7 @@ async function resolveMarketFromUrl(
 
   if (!seriesOrEvent) return null;
 
-  const descriptiveTokens = [
-    parts.candidateSlug,
-    parts.descriptiveSlug
-  ]
+  const descriptiveTokens = [parts.candidateSlug, parts.descriptiveSlug]
     .filter(Boolean)
     .flatMap((slug) =>
       String(slug)

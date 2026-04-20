@@ -13,7 +13,12 @@ import {
 } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { processToolCalls, cleanupMessages } from "./utils";
-import { tools, executions, parseScheduledPayload, runCheckWatchlist } from "./tools";
+import {
+  tools,
+  executions,
+  parseScheduledPayload,
+  runCheckWatchlist
+} from "./tools";
 // import { env } from "cloudflare:workers";
 
 const model = openai("gpt-4o-2024-11-20");

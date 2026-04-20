@@ -118,11 +118,7 @@ export function AnalyzeTab() {
               className="min-w-[240px] flex-1"
               placeholder="Paste Kalshi URL or ticker"
             />
-            <Button
-              variant="primary"
-              onClick={handleAnalyze}
-              loading={loading}
-            >
+            <Button variant="primary" onClick={handleAnalyze} loading={loading}>
               Analyze
             </Button>
           </div>
@@ -130,39 +126,70 @@ export function AnalyzeTab() {
         </div>
       </Card>
 
-      {analysisResult && typeof analysisResult === "object" && "error" in analysisResult ? (
+      {analysisResult &&
+      typeof analysisResult === "object" &&
+      "error" in analysisResult ? (
         <Card className="bg-white">
           <p className="text-sm text-red-500">
-            {(analysisResult as { error?: string }).error ?? "Unable to analyze market."}
+            {(analysisResult as { error?: string }).error ??
+              "Unable to analyze market."}
           </p>
         </Card>
       ) : null}
 
-      {analysisResult && typeof analysisResult === "object" && "markets" in analysisResult ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {(analysisResult as { markets: MarketSnapshot[] }).markets.map((market) => (
-            <SnapshotCard
-              key={market.ticker}
-              snapshot={market}
-              onSelect={() => setSelectedTicker(market.ticker)}
-              onResearch={() => handleResearch(market.ticker)}
-            />
-          ))}
-        </div>
-      ) : null}
+      {analysisResult &&
+      typeof analysisResult === "object" &&
+      "markets" in analysisResult
+        ? (() => {
+            const markets = (analysisResult as { markets: MarketSnapshot[] })
+              .markets;
+            const visible = markets.filter(
+              (market) =>
+                typeof market.yesPrice === "number" && market.yesPrice > 0.01
+            );
+            const hiddenCount = markets.length - visible.length;
 
-      {analysisResult && typeof analysisResult === "object" && "ticker" in analysisResult ? (
+            return (
+              <div className="space-y-3">
+                {hiddenCount > 0 && (
+                  <Card className="bg-white text-sm text-neutral-500">
+                    {hiddenCount} markets hidden because YES odds ≤ 1%.
+                  </Card>
+                )}
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {visible.map((market) => (
+                    <SnapshotCard
+                      key={market.ticker}
+                      snapshot={market}
+                      onSelect={() => setSelectedTicker(market.ticker)}
+                      onResearch={() => handleResearch(market.ticker)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })()
+        : null}
+
+      {analysisResult &&
+      typeof analysisResult === "object" &&
+      "ticker" in analysisResult ? (
         <SnapshotCard
           snapshot={analysisResult as MarketSnapshot}
-          onSelect={() => setSelectedTicker((analysisResult as MarketSnapshot).ticker)}
-          onResearch={() => handleResearch((analysisResult as MarketSnapshot).ticker)}
+          onSelect={() =>
+            setSelectedTicker((analysisResult as MarketSnapshot).ticker)
+          }
+          onResearch={() =>
+            handleResearch((analysisResult as MarketSnapshot).ticker)
+          }
         />
       ) : null}
 
       <Card className="bg-white">
         <p className="text-sm text-neutral-500">
           When you’re ready, research a specific market to see probabilities,
-          confidence, and recommended actions. Default max bet: {settings.maxBet}.
+          confidence, and recommended actions. Default max bet:{" "}
+          {settings.maxBet}.
         </p>
       </Card>
     </div>

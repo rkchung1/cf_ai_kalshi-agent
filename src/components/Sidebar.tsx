@@ -17,11 +17,19 @@ const tabs: Array<{
   icon: React.ReactNode;
 }> = [
   { key: "analyze", label: "Analyze", icon: <TargetIcon size={18} /> },
-  { key: "watchlist", label: "Watchlist", icon: <ListMagnifyingGlassIcon size={18} /> },
+  {
+    key: "watchlist",
+    label: "Watchlist",
+    icon: <ListMagnifyingGlassIcon size={18} />
+  },
   { key: "trades", label: "Trades", icon: <WalletIcon size={18} /> },
   { key: "journal", label: "Journal", icon: <ClipboardTextIcon size={18} /> },
   { key: "alerts", label: "Alerts", icon: <BellRingingIcon size={18} /> },
-  { key: "settings", label: "Settings", icon: <SlidersHorizontalIcon size={18} /> },
+  {
+    key: "settings",
+    label: "Settings",
+    icon: <SlidersHorizontalIcon size={18} />
+  },
   { key: "debug", label: "Debug", icon: <BugIcon size={18} /> }
 ];
 

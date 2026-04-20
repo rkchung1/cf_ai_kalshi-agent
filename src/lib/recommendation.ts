@@ -24,12 +24,13 @@ export function computeEntryThreshold(
   const conf = clamp(confidence, 0, 1);
   const liq = clamp(liquidity, 0, 1);
   const timeFactor = clamp((daysToResolution - 30) / 90, 0, 1);
-  return (
-    base + 0.04 * (1 - conf) + 0.03 * (1 - liq) + 0.02 * timeFactor
-  );
+  return base + 0.04 * (1 - conf) + 0.03 * (1 - liq) + 0.02 * timeFactor;
 }
 
-function pickSize(edgeAbs: number, threshold: number): "SMALL" | "MEDIUM" | "LARGE" {
+function pickSize(
+  edgeAbs: number,
+  threshold: number
+): "SMALL" | "MEDIUM" | "LARGE" {
   if (edgeAbs >= threshold * 2) return "LARGE";
   if (edgeAbs >= threshold * 1.5) return "MEDIUM";
   return "SMALL";

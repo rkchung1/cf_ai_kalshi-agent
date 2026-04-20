@@ -77,8 +77,16 @@ export function TradesTab() {
                 }}
                 className="grid w-full grid-cols-7 gap-3 py-3 text-left hover:bg-neutral-50"
               >
-                <div className="font-medium text-neutral-800">{trade.ticker}</div>
-                <div>{trade.side === "YES" ? <ActionBadge action="BUY_YES" /> : <ActionBadge action="BUY_NO" />}</div>
+                <div className="font-medium text-neutral-800">
+                  {trade.ticker}
+                </div>
+                <div>
+                  {trade.side === "YES" ? (
+                    <ActionBadge action="BUY_YES" />
+                  ) : (
+                    <ActionBadge action="BUY_NO" />
+                  )}
+                </div>
                 <div>{trade.size}</div>
                 <div>{trade.entryPrice.toFixed(3)}</div>
                 <div>{new Date(trade.entryTime).toLocaleString()}</div>

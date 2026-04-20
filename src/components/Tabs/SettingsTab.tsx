@@ -22,13 +22,16 @@ export function SettingsTab() {
       <Card className="bg-white">
         <h2 className="text-lg font-semibold text-neutral-900">Settings</h2>
         <p className="text-sm text-neutral-500">
-          Configure default sizing, alert sensitivity, and scheduling preferences.
+          Configure default sizing, alert sensitivity, and scheduling
+          preferences.
         </p>
       </Card>
 
       <Card className="bg-white space-y-4">
         <div>
-          <div className="text-xs uppercase text-neutral-400">Default Max Bet</div>
+          <div className="text-xs uppercase text-neutral-400">
+            Default Max Bet
+          </div>
           <Input
             type="number"
             min={1}
@@ -41,7 +44,9 @@ export function SettingsTab() {
         </div>
 
         <div>
-          <div className="text-xs uppercase text-neutral-400">Alert Threshold</div>
+          <div className="text-xs uppercase text-neutral-400">
+            Alert Threshold
+          </div>
           <Input
             type="number"
             step="0.01"
@@ -73,7 +78,12 @@ export function SettingsTab() {
           <div className="text-sm text-neutral-500">
             Alert threshold will be applied to watchlist checks.
           </div>
-          <Button variant="primary" size="sm" onClick={handleSave} loading={saving}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSave}
+            loading={saving}
+          >
             Apply Settings
           </Button>
         </div>

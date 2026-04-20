@@ -30,7 +30,10 @@ export function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x));
 }
 
-export function computeAgentProbability(pMarket: number, delta: number): number {
+export function computeAgentProbability(
+  pMarket: number,
+  delta: number
+): number {
   return clamp01(pMarket + delta);
 }
 

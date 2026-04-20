@@ -199,10 +199,17 @@ type AppState = {
   status: string;
   runTool: <T = unknown>(toolName: ToolName, input: unknown) => Promise<T>;
   approvals: ApprovalItem[];
-  approveToolCall: (toolCallId: string, toolName: ToolName, approved: boolean) => void;
+  approveToolCall: (
+    toolCallId: string,
+    toolName: ToolName,
+    approved: boolean
+  ) => void;
   updateSnapshot: (snapshot: MarketSnapshot) => void;
   updateResearch: (ticker: string, research: ResearchResult) => void;
-  updateRecommendation: (ticker: string, recommendation: RecommendationResult) => void;
+  updateRecommendation: (
+    ticker: string,
+    recommendation: RecommendationResult
+  ) => void;
   setWatchlist: (tickers: string[]) => void;
   setTrades: (trades: Trade[]) => void;
   addAlert: (alert: AlertItem) => void;
@@ -248,15 +255,10 @@ function stableStringify(value: unknown): string {
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const agent = useAgent({ agent: "chat" });
-  const {
-    messages,
-    sendMessage,
-    addToolResult,
-    clearHistory,
-    status
-  } = useAgentChat<unknown, UIMessage<{ createdAt: string }>>({
-    agent
-  });
+  const { messages, sendMessage, addToolResult, clearHistory, status } =
+    useAgentChat<unknown, UIMessage<{ createdAt: string }>>({
+      agent
+    });
 
   const [selectedTab, setSelectedTab] = useState<TabKey>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.tab);
@@ -266,7 +268,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
   const [analysisInput, setAnalysisInput] = useState("");
   const [analysisResult, setAnalysisResult] = useState<unknown>(null);
-  const [snapshots, setSnapshots] = useState<Record<string, MarketSnapshot>>({});
+  const [snapshots, setSnapshots] = useState<Record<string, MarketSnapshot>>(
+    {}
+  );
   const [research, setResearch] = useState<Record<string, ResearchResult>>({});
   const [recommendations, setRecommendations] = useState<
     Record<string, RecommendationResult>
@@ -288,7 +292,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const stored = localStorage.getItem(STORAGE_KEYS.settings);
     if (!stored) return DEFAULT_SETTINGS;
     try {
-      return { ...DEFAULT_SETTINGS, ...(JSON.parse(stored) as Partial<Settings>) };
+      return {
+        ...DEFAULT_SETTINGS,
+        ...(JSON.parse(stored) as Partial<Settings>)
+      };
     } catch {
       return DEFAULT_SETTINGS;
     }
@@ -367,7 +374,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       message.parts?.some((part) => {
         if (!isStaticToolUIPart(part)) return false;
         const toolName = part.type.replace("tool-", "") as ToolName;
-        return toolsRequiringConfirmation.includes(toolName) && part.state === "input-available";
+        return (
+          toolsRequiringConfirmation.includes(toolName) &&
+          part.state === "input-available"
+        );
       })
     );
 
@@ -490,10 +500,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setSnapshots((prev) => ({ ...prev, [snapshot.ticker]: snapshot }));
   }, []);
 
-  const updateResearch = useCallback((ticker: string, result: ResearchResult) => {
-    if (!ticker) return;
-    setResearch((prev) => ({ ...prev, [ticker]: result }));
-  }, []);
+  const updateResearch = useCallback(
+    (ticker: string, result: ResearchResult) => {
+      if (!ticker) return;
+      setResearch((prev) => ({ ...prev, [ticker]: result }));
+    },
+    []
+  );
 
   const updateRecommendation = useCallback(
     (ticker: string, recommendation: RecommendationResult) => {
@@ -579,7 +592,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
+    <AppStateContext.Provider value={value}>
+      {children}
+    </AppStateContext.Provider>
   );
 }
 

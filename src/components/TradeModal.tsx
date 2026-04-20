@@ -18,7 +18,11 @@ export function TradeModal({
   snapshot?: MarketSnapshot;
   defaultSide?: "YES" | "NO";
   defaultSize?: number;
-  onSubmit: (payload: { side: "YES" | "NO"; size: number; price: number }) => void;
+  onSubmit: (payload: {
+    side: "YES" | "NO";
+    size: number;
+    price: number;
+  }) => void;
 }) {
   const [side, setSide] = useState<"YES" | "NO">(defaultSide);
   const [size, setSize] = useState(defaultSize);
@@ -30,8 +34,10 @@ export function TradeModal({
     }
   }, [isOpen, defaultSide, defaultSize]);
   const price = useMemo(() => {
-    const yesPrice = typeof snapshot?.yesPrice === "number" ? snapshot.yesPrice : 0;
-    const noPrice = typeof snapshot?.noPrice === "number" ? snapshot.noPrice : 0;
+    const yesPrice =
+      typeof snapshot?.yesPrice === "number" ? snapshot.yesPrice : 0;
+    const noPrice =
+      typeof snapshot?.noPrice === "number" ? snapshot.noPrice : 0;
     return side === "YES" ? yesPrice : noPrice;
   }, [snapshot, side]);
 
@@ -39,7 +45,9 @@ export function TradeModal({
     <Modal isOpen={isOpen} onClose={onClose}>
       <div className="space-y-4">
         <div>
-          <h3 className="text-lg font-semibold text-neutral-900">Log Paper Trade</h3>
+          <h3 className="text-lg font-semibold text-neutral-900">
+            Log Paper Trade
+          </h3>
           <p className="text-sm text-neutral-500">
             Record a simulated trade for {snapshot?.ticker ?? "this market"}.
           </p>

@@ -63,7 +63,9 @@ export function WatchlistTab() {
 
   const handleAdd = async () => {
     if (!newTicker.trim()) return;
-    const result = await runTool("addToWatchlist", { ticker: newTicker.trim() });
+    const result = await runTool("addToWatchlist", {
+      ticker: newTicker.trim()
+    });
     if (result && typeof result === "object" && "watchlist" in result) {
       setWatchlist((result as { watchlist: string[] }).watchlist);
     }
@@ -152,7 +154,10 @@ export function WatchlistTab() {
         updateSnapshot((result as { snapshot: { ticker: string } }).snapshot);
       }
       if ("research" in result) {
-        updateResearch(ticker, (result as { research: Record<string, unknown> }).research);
+        updateResearch(
+          ticker,
+          (result as { research: Record<string, unknown> }).research
+        );
       }
       updateRecommendation(ticker, result as Record<string, unknown>);
     }
@@ -175,17 +180,32 @@ export function WatchlistTab() {
           <Button variant="primary" size="sm" onClick={handleAdd}>
             Add
           </Button>
-          <Button variant="secondary" size="sm" onClick={handleRefreshPrices} loading={loading}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleRefreshPrices}
+            loading={loading}
+          >
             Refresh prices
           </Button>
-          <Button variant="secondary" size="sm" onClick={handleCheckWatchlist} loading={loading}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleCheckWatchlist}
+            loading={loading}
+          >
             Run check now
           </Button>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
           <span>Schedule checks every</span>
           <Select
-            options={[{ value: "5" }, { value: "15" }, { value: "30" }, { value: "60" }]}
+            options={[
+              { value: "5" },
+              { value: "15" },
+              { value: "30" },
+              { value: "60" }
+            ]}
             value={String(settings.frequencyMinutes)}
             setValue={(value) =>
               setSettings({ ...settings, frequencyMinutes: Number(value) })
@@ -193,7 +213,12 @@ export function WatchlistTab() {
             size="sm"
           />
           <span>minutes</span>
-          <Button variant="secondary" size="sm" onClick={handleSchedule} loading={scheduleLoading}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleSchedule}
+            loading={scheduleLoading}
+          >
             Enable scheduled checks
           </Button>
         </div>
@@ -231,8 +256,14 @@ export function WatchlistTab() {
               </div>
               <div className="truncate">{row.title}</div>
               <div>{row.yesPrice?.toFixed(3) ?? "—"}</div>
-              <div>{row.resolutionDate ? new Date(row.resolutionDate).toLocaleDateString() : "—"}</div>
-              <div>{row.action ? <ActionBadge action={row.action} /> : "—"}</div>
+              <div>
+                {row.resolutionDate
+                  ? new Date(row.resolutionDate).toLocaleDateString()
+                  : "—"}
+              </div>
+              <div>
+                {row.action ? <ActionBadge action={row.action} /> : "—"}
+              </div>
               <div>
                 {row.pAgent !== undefined ? row.pAgent.toFixed(2) : "—"} /{" "}
                 {row.confidence !== undefined ? (

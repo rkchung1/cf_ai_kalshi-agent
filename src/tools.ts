@@ -95,12 +95,18 @@ function normalizeClaim(raw: Claim): Claim {
 }
 
 function formatArticles(
-  articles: { title: string; source: string; publishedAt: string; url: string }[]
+  articles: {
+    title: string;
+    source: string;
+    publishedAt: string;
+    url: string;
+  }[]
 ): string {
   if (!articles.length) return "No articles available.";
   return articles
-    .map((article, index) =>
-      `${index + 1}. ${article.title} — ${article.source} — ${article.publishedAt} — ${article.url}`
+    .map(
+      (article, index) =>
+        `${index + 1}. ${article.title} — ${article.source} — ${article.publishedAt} — ${article.url}`
     )
     .join("\n");
 }
@@ -118,7 +124,11 @@ function extractAnchorTerms(snapshot: {
   const add = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
-    if (!terms.find((existing) => existing.toLowerCase() === trimmed.toLowerCase())) {
+    if (
+      !terms.find(
+        (existing) => existing.toLowerCase() === trimmed.toLowerCase()
+      )
+    ) {
       terms.push(trimmed);
     }
   };
@@ -196,7 +206,8 @@ function filterArticlesBySnapshot(
   });
 
   return articles.filter((article) => {
-    const haystack = `${article.title} ${article.description ?? ""}`.toLowerCase();
+    const haystack =
+      `${article.title} ${article.description ?? ""}`.toLowerCase();
     return Array.from(anchorTokens).some((token) => haystack.includes(token));
   });
 }
@@ -501,8 +512,13 @@ function readEnv(
   return env?.[key];
 }
 
-function getCurrentPosition(trades: Array<{ ticker: string; side: TradeSide }>, ticker: string): Position {
-  const lastTrade = [...trades].reverse().find((trade) => trade.ticker === ticker);
+function getCurrentPosition(
+  trades: Array<{ ticker: string; side: TradeSide }>,
+  ticker: string
+): Position {
+  const lastTrade = [...trades]
+    .reverse()
+    .find((trade) => trade.ticker === ticker);
   return lastTrade ? lastTrade.side : "NONE";
 }
 
@@ -514,7 +530,9 @@ function daysToResolution(resolutionDate: string): number {
   return Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 }
 
-function parseScheduledPayload(payload: string): { type: "checkWatchlist" } | null {
+function parseScheduledPayload(
+  payload: string
+): { type: "checkWatchlist" } | null {
   if (payload === "checkWatchlist") return { type: "checkWatchlist" };
   try {
     const parsed = JSON.parse(payload) as { type?: string };
@@ -563,11 +581,18 @@ function minutesToCron(frequencyMinutes: number): {
   note?: string;
 } {
   if (frequencyMinutes <= 0) {
-    return { cron: "*/30 * * * *", normalizedMinutes: 30, note: "Defaulted to 30 minutes." };
+    return {
+      cron: "*/30 * * * *",
+      normalizedMinutes: 30,
+      note: "Defaulted to 30 minutes."
+    };
   }
 
   if (frequencyMinutes < 60) {
-    return { cron: `*/${frequencyMinutes} * * * *`, normalizedMinutes: frequencyMinutes };
+    return {
+      cron: `*/${frequencyMinutes} * * * *`,
+      normalizedMinutes: frequencyMinutes
+    };
   }
 
   if (frequencyMinutes % 60 === 0) {
@@ -607,7 +632,11 @@ async function runResearch(
 
   const newsKey = readEnv("NEWS_API_KEY");
   const newsProxy = readEnv("NEWS_API_PROXY_URL");
-  const { articles, usedQueries, errors: newsErrors } = await fetchTopNewsWithFallback(
+  const {
+    articles,
+    usedQueries,
+    errors: newsErrors
+  } = await fetchTopNewsWithFallback(
     buildNewsQueries(snapshot),
     newsKey,
     newsProxy
@@ -662,26 +691,21 @@ Provide a concise research brief. Use only the snapshot and headlines provided.
     articles: filteredArticles,
     newsQueries: usedQueries,
     newsErrors,
-    bull_case:
-      object?.bull_case?.map((item) => item.trim()).filter(Boolean) ?? [
-        "Insufficient data to form a bull case."
-      ],
-    bear_case:
-      object?.bear_case?.map((item) => item.trim()).filter(Boolean) ?? [
-        "Insufficient data to form a bear case."
-      ],
-    base_case:
-      object?.base_case?.map((item) => item.trim()).filter(Boolean) ?? [
-        "Insufficient data to form a base case."
-      ],
-    key_risks:
-      object?.key_risks?.map((risk) => risk.trim()).filter(Boolean) ?? [
-        "Insufficient data to identify key risks."
-      ],
-    invalidators:
-      object?.invalidators
-        ?.map((invalidator) => invalidator.trim())
-        .filter(Boolean) ?? ["Insufficient data to identify invalidators."],
+    bull_case: object?.bull_case
+      ?.map((item) => item.trim())
+      .filter(Boolean) ?? ["Insufficient data to form a bull case."],
+    bear_case: object?.bear_case
+      ?.map((item) => item.trim())
+      .filter(Boolean) ?? ["Insufficient data to form a bear case."],
+    base_case: object?.base_case
+      ?.map((item) => item.trim())
+      .filter(Boolean) ?? ["Insufficient data to form a base case."],
+    key_risks: object?.key_risks
+      ?.map((risk) => risk.trim())
+      .filter(Boolean) ?? ["Insufficient data to identify key risks."],
+    invalidators: object?.invalidators
+      ?.map((invalidator) => invalidator.trim())
+      .filter(Boolean) ?? ["Insufficient data to identify invalidators."],
     claims,
     p_market: pMarket,
     delta,
@@ -701,7 +725,11 @@ Provide a concise research brief. Use only the snapshot and headlines provided.
 
 async function getRecommendationForTicker(
   ticker: string,
-  options?: { maxBet?: number; snapshotOverride?: MarketSnapshot; sessionId?: string }
+  options?: {
+    maxBet?: number;
+    snapshotOverride?: MarketSnapshot;
+    sessionId?: string;
+  }
 ): Promise<RecommendationResult | null> {
   const sessionId = resolveSessionId(options?.sessionId);
   const state = getSessionState(sessionId);

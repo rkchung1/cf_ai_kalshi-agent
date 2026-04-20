@@ -44,7 +44,7 @@ async function fetchTopNewsWithStatus(
   url.searchParams.set("language", "en");
   url.searchParams.set("sortBy", "publishedAt");
   url.searchParams.set("searchIn", "title,description");
-  url.searchParams.set("pageSize", "20");
+  url.searchParams.set("pageSize", "50");
   if (apiKey) {
     url.searchParams.set("apiKey", apiKey);
   }
@@ -146,12 +146,12 @@ export async function fetchTopNewsWithFallback(
       }
     }
 
-    if (byUrl.size >= 10) break;
+    if (byUrl.size >= 50) break;
   }
 
   const articles = Array.from(byUrl.values())
     .sort((a, b) => String(b.publishedAt).localeCompare(String(a.publishedAt)))
-    .slice(0, 10);
+    .slice(0, 50);
 
   return { articles, usedQueries, errors };
 }

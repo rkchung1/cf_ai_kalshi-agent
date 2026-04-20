@@ -16,8 +16,7 @@ export function Badge({ label, variant = "neutral", className }: BadgeProps) {
             variant === "neutral",
           "border-emerald-200 bg-emerald-100 text-emerald-700":
             variant === "success",
-          "border-amber-200 bg-amber-100 text-amber-700":
-            variant === "warning",
+          "border-amber-200 bg-amber-100 text-amber-700": variant === "warning",
           "border-red-200 bg-red-100 text-red-700": variant === "danger",
           "border-blue-200 bg-blue-100 text-blue-700": variant === "info"
         },
@@ -47,8 +46,7 @@ export function ActionBadge({ action }: { action?: string }) {
 
 export function ConfidenceBadge({ confidence }: { confidence?: number }) {
   const value = typeof confidence === "number" ? confidence : 0;
-  const label =
-    value >= 0.7 ? "High" : value >= 0.4 ? "Medium" : "Low";
+  const label = value >= 0.7 ? "High" : value >= 0.4 ? "Medium" : "Low";
   const variant =
     value >= 0.7 ? "success" : value >= 0.4 ? "warning" : "danger";
   return <Badge label={`Confidence ${label}`} variant={variant} />;

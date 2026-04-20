@@ -51,7 +51,8 @@ function DashboardApp() {
   const recommendation = selectedTicker
     ? recommendations[selectedTicker]
     : undefined;
-  const suggestedSide: "YES" | "NO" = recommendation?.action === "BUY_NO" ? "NO" : "YES";
+  const suggestedSide: "YES" | "NO" =
+    recommendation?.action === "BUY_NO" ? "NO" : "YES";
   const suggestedSize = (() => {
     if (!recommendation?.size) return 10;
     if (recommendation.size === "SMALL") return settings.maxBet * 0.25;
@@ -192,7 +193,9 @@ function DashboardApp() {
                   { value: "debug" }
                 ]}
                 value={selectedTab}
-                setValue={(value) => setSelectedTab(value as typeof selectedTab)}
+                setValue={(value) =>
+                  setSelectedTab(value as typeof selectedTab)
+                }
                 size="sm"
               />
             </div>
@@ -215,7 +218,8 @@ function DashboardApp() {
                   <div>Size: {selectedTrade.size}</div>
                   <div>Entry: {selectedTrade.entryPrice.toFixed(3)}</div>
                   <div>
-                    Entry Time: {new Date(selectedTrade.entryTime).toLocaleString()}
+                    Entry Time:{" "}
+                    {new Date(selectedTrade.entryTime).toLocaleString()}
                   </div>
                 </div>
                 <div className="mt-3 flex items-center gap-2">

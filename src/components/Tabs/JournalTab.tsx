@@ -26,7 +26,9 @@ export function JournalTab() {
               className="border-b border-neutral-100 pb-4 last:border-0"
             >
               <div className="flex items-center gap-3">
-                <div className="font-semibold text-neutral-800">{entry.ticker}</div>
+                <div className="font-semibold text-neutral-800">
+                  {entry.ticker}
+                </div>
                 <div className="text-xs uppercase text-neutral-400">
                   Outcome {entry.outcome}
                 </div>
@@ -39,7 +41,9 @@ export function JournalTab() {
               {entry.summary && <p className="mt-2">{entry.summary}</p>}
               {entry.lessons?.length ? (
                 <div className="mt-2">
-                  <div className="text-xs uppercase text-neutral-400">Lessons</div>
+                  <div className="text-xs uppercase text-neutral-400">
+                    Lessons
+                  </div>
                   <ul className="list-disc pl-5">
                     {entry.lessons.map((lesson, index) => (
                       // biome-ignore lint/suspicious/noArrayIndexKey: stable display list
