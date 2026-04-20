@@ -582,8 +582,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       updateSnapshot,
       updateResearch,
       updateRecommendation,
-      setWatchlist,
-      setTrades,
       addAlert,
       addPostMortem,
       addDebugEntry,

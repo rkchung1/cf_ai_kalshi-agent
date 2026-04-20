@@ -99,7 +99,7 @@ function extractUrlParts(tickerOrUrl: string): {
   try {
     const url = new URL(trimmed);
     const segments = url.pathname.split("/").filter(Boolean);
-    const marketsIndex = segments.findIndex((segment) => segment === "markets");
+    const marketsIndex = segments.indexOf("markets");
     if (marketsIndex === -1) return { isUrl: true };
 
     const seriesOrEvent = segments[marketsIndex + 1];
@@ -309,7 +309,7 @@ function scoreMarketMatch(
   if (candidateTicker && ticker?.includes(candidateTicker)) score += 50;
 
   const title = String(market.title ?? "").toLowerCase();
-  if (slugTokens && slugTokens.length) {
+  if (slugTokens?.length) {
     const matches = slugTokens.filter((token) => title.includes(token)).length;
     score += matches * 5;
   }

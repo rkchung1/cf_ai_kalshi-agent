@@ -77,9 +77,9 @@ export function AnalyzeTab() {
         "markets" in output &&
         Array.isArray((output as { markets?: MarketSnapshot[] }).markets)
       ) {
-        (output as { markets: MarketSnapshot[] }).markets.forEach((market) =>
-          updateSnapshot(market)
-        );
+        (output as { markets: MarketSnapshot[] }).markets.forEach((market) => {
+          updateSnapshot(market);
+        });
       }
     } catch (err) {
       setError((err as Error).message);

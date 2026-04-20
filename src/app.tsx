@@ -1,6 +1,10 @@
 /** biome-ignore-all lint/correctness/useUniqueElementIds: it's alright */
 import { useEffect, useMemo, useRef, useState, use } from "react";
-import { AppStateProvider, useAppState } from "@/context/AppStateContext";
+import {
+  AppStateProvider,
+  useAppState,
+  type Trade
+} from "@/context/AppStateContext";
 import { Sidebar } from "@/components/Sidebar";
 import { AnalyzeTab } from "@/components/Tabs/AnalyzeTab";
 import { WatchlistTab } from "@/components/Tabs/WatchlistTab";
@@ -24,7 +28,6 @@ function DashboardApp() {
     snapshots,
     research,
     recommendations,
-    trades,
     settings,
     runTool,
     setWatchlist,
@@ -76,11 +79,11 @@ function DashboardApp() {
     runTool("listTrades", {})
       .then((result) => {
         if (result && typeof result === "object" && "trades" in result) {
-          setTrades((result as { trades: typeof trades }).trades);
+          setTrades((result as { trades: Trade[] }).trades);
         }
       })
       .catch(() => null);
-  }, [runTool, setTrades, setWatchlist, trades]);
+  }, [runTool, setTrades, setWatchlist]);
 
   const handleRecommend = async () => {
     if (!selectedTicker) return;
@@ -124,7 +127,7 @@ function DashboardApp() {
       ...payload
     });
     if (result && typeof result === "object" && "trades" in result) {
-      setTrades((result as { trades: typeof trades }).trades);
+      setTrades((result as { trades: Trade[] }).trades);
       setSelectedTab("trades");
     }
     setTradeLoading(false);
@@ -158,7 +161,6 @@ function DashboardApp() {
         return <SettingsTab />;
       case "debug":
         return <DebugTab />;
-      case "analyze":
       default:
         return <AnalyzeTab />;
     }

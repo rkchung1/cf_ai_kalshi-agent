@@ -289,10 +289,9 @@ export function ResearchDetails({
             </h3>
             {research.articles?.length ? (
               <ul className="mt-3 space-y-2 text-sm text-neutral-600">
-                {research.articles.map((article, index) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: stable display list
+                {research.articles.map((article) => (
                   <li
-                    key={index}
+                    key={article.url}
                     className="border-b border-neutral-100 pb-2 last:border-0"
                   >
                     <a

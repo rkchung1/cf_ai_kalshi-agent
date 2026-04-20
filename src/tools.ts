@@ -5,7 +5,7 @@ import { tool, type ToolSet, generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod/v3";
 import { getCurrentAgent } from "agents";
-import { scheduleSchema } from "agents/schedule";
+import type { scheduleSchema } from "agents/schedule";
 
 import type { Chat } from "./server";
 import {
@@ -148,12 +148,16 @@ function extractAnchorTerms(snapshot: {
     /([A-Z][A-Za-z0-9.&-]*(?:\s+[A-Z][A-Za-z0-9.&-]*)*)/g
   );
   if (properMatches) {
-    properMatches.forEach((match) => add(match));
+    properMatches.forEach((match) => {
+      add(match);
+    });
   }
 
   const acronymMatches = title.match(/\b[A-Z]{2,}\b/g);
   if (acronymMatches) {
-    acronymMatches.forEach((match) => add(match));
+    acronymMatches.forEach((match) => {
+      add(match);
+    });
   }
 
   const tickerParts = ticker.split("-").filter(Boolean);
@@ -202,7 +206,9 @@ function filterArticlesBySnapshot(
       .map((token) => token.toLowerCase())
       .filter((token) => token.length >= 3)
       .filter((token) => !stopwords.has(token))
-      .forEach((token) => anchorTokens.add(token));
+      .forEach((token) => {
+        anchorTokens.add(token);
+      });
   });
 
   return articles.filter((article) => {
@@ -422,24 +428,32 @@ function buildNewsQueries(snapshot: {
     /([A-Z][A-Za-z0-9.&-]*(?:\\s+[A-Z][A-Za-z0-9.&-]*)*)/g
   );
   if (properFromDescription) {
-    properFromDescription.forEach((match) => addEntity(match, 3));
+    properFromDescription.forEach((match) => {
+      addEntity(match, 3);
+    });
   }
 
   const properFromTitle = title.match(
     /([A-Z][A-Za-z0-9.&-]*(?:\\s+[A-Z][A-Za-z0-9.&-]*)*)/g
   );
   if (properFromTitle) {
-    properFromTitle.forEach((match) => addEntity(match, 2));
+    properFromTitle.forEach((match) => {
+      addEntity(match, 2);
+    });
   }
 
   const acronyms = rawText.match(/\\b[A-Z]{2,}\\b/g);
   if (acronyms) {
-    acronyms.forEach((match) => addEntity(match, 2));
+    acronyms.forEach((match) => {
+      addEntity(match, 2);
+    });
   }
 
-  const quotedMatches = rawText.match(/\"([^\"]{3,})\"/g);
+  const quotedMatches = rawText.match(/"([^"]{3,})"/g);
   if (quotedMatches) {
-    quotedMatches.forEach((match) => addEntity(match.replace(/\"/g, ""), 2));
+    quotedMatches.forEach((match) => {
+      addEntity(match.replace(/"/g, ""), 2);
+    });
   }
 
   const tickerParts = ticker.split("-").filter(Boolean);
@@ -458,8 +472,12 @@ function buildNewsQueries(snapshot: {
     push(topTokens.join(" "));
   }
 
-  topPhrases.forEach((phrase) => push(phrase));
-  topEntities.forEach((entity) => push(entity));
+  topPhrases.forEach((phrase) => {
+    push(phrase);
+  });
+  topEntities.forEach((entity) => {
+    push(entity);
+  });
 
   const topTerms = topTokens.slice(0, 3);
   if (topEntities.length && topTerms.length) {
@@ -656,7 +674,7 @@ Market prior (p_market) from pricing: ${pMarket.toFixed(3)}.
 
 Provide a concise research brief. Use only the snapshot and headlines provided.
 - Use p_market as the prior; output only a delta adjustment in [-0.20, +0.20].
-- If evidence is weak, keep delta near 0 and include an \"insufficient evidence\" claim.
+- If evidence is weak, keep delta near 0 and include an "insufficient evidence" claim.
 - Claims must be grounded only in the provided articles or market description.
 - recency_hours should be conservative (24-168 if unknown).
 - reliability must be 0..1 (lower for weaker evidence).
@@ -901,12 +919,12 @@ const researchMarket = tool({
       formatArticles(research.articles),
       "",
       "NEWS QUERIES USED",
-      research.newsQueries && research.newsQueries.length
+      research.newsQueries?.length
         ? research.newsQueries.map((query) => `- ${query}`).join("\n")
         : "No queries executed.",
       "",
       "NEWS FETCH ERRORS",
-      research.newsErrors && research.newsErrors.length
+      research.newsErrors?.length
         ? research.newsErrors.map((err) => `- ${err}`).join("\n")
         : "None",
       "",
@@ -1012,12 +1030,12 @@ const recommendTrade = tool({
       formatArticles(result.research.articles),
       "",
       "NEWS QUERIES USED",
-      result.research.newsQueries && result.research.newsQueries.length
+      result.research.newsQueries?.length
         ? result.research.newsQueries.map((query) => `- ${query}`).join("\n")
         : "No queries executed.",
       "",
       "NEWS FETCH ERRORS",
-      result.research.newsErrors && result.research.newsErrors.length
+      result.research.newsErrors?.length
         ? result.research.newsErrors.map((err) => `- ${err}`).join("\n")
         : "None",
       "",
